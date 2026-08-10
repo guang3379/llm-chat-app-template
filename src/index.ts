@@ -206,14 +206,10 @@ async function handleImageRequest(
 		const width = clampDimension(body.width ?? 1024);
 		const height = clampDimension(body.height ?? 1024);
 
-		// The published Worker types may not include the multipart input for newer
-		// FLUX.2 image models yet, so call through a permissive signature.
-		const run = env.AI.run as (model: string, input: unknown) => Promise<unknown>;
-
 		let resp: unknown;
 		if (model === "@cf/black-forest-labs/flux-1-schnell") {
 			// FLUX.1 schnell takes a plain JSON input
-			resp = await run(model, { prompt });
+			resp = await runModel(env, model, { prompt });
 		} else {
 			// FLUX.2 models require multipart form data, even for text-only prompts
 			const form = new FormData();
@@ -225,12 +221,16 @@ async function handleImageRequest(
 			// Response constructor serializes it and generates the Content-Type header
 			// with the boundary, which is required for the server to parse the multipart fields.
 			const formResponse = new Response(form);
-			resp = await run(model, {
-				multipart: {
-					body: formResponse.body,
-					contentType: formResponse.headers.get("content-type"),
+			resp = await runModel(
+				env,
+				model,
+				{
+					multipart: {
+						body: formResponse.body,
+						contentType: formResponse.headers.get("content-type"),
+					},
 				},
-			});
+			);
 		}
 
 		const { image, contentType } = resp as unknown as {
@@ -246,10 +246,30 @@ async function handleImageRequest(
 	} catch (error) {
 		console.error("Error processing image request:", error);
 		return Response.json(
-			{ error: "Failed to generate image" },
+			{
+				error:
+					error instanceof Error
+						? error.message
+						: "Failed to generate image",
+			},
 			{ status: 500, headers: CORS_HEADERS },
 		);
 	}
+}
+
+/**
+ * Calls env.AI.run while keeping the binding as `this`, and tolerates model
+ * input types that are newer than the published Worker type definitions.
+ */
+function runModel(
+	env: Env,
+	model: string,
+	input: unknown,
+): Promise<unknown> {
+	return (env.AI.run as (model: string, input: unknown) => Promise<unknown>)(
+		model,
+		input,
+	);
 }
 
 /**
