@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>LLM Chat App</title>
+		<title>Cloudflare AI Chat + Image</title>
 		<style>
 			:root {
 				--primary-color: #f6821f;
@@ -35,7 +35,7 @@
 
 			header {
 				text-align: center;
-				margin-bottom: 2rem;
+				margin-bottom: 1.5rem;
 				padding: 1rem 0;
 				border-bottom: 1px solid var(--border-color);
 			}
@@ -45,10 +45,34 @@
 				color: var(--primary-color);
 			}
 
+			.tabs {
+				display: flex;
+				gap: 0.5rem;
+				margin-bottom: 1rem;
+			}
+
+			.tab {
+				flex: 1;
+				padding: 0.65rem;
+				border: 1px solid var(--border-color);
+				background: white;
+				border-radius: 6px;
+				cursor: pointer;
+				font-size: 0.95rem;
+				font-family: inherit;
+				color: var(--text-color);
+			}
+
+			.tab.active {
+				background-color: var(--primary-color);
+				color: white;
+				border-color: var(--primary-color);
+			}
+
 			.chat-container {
 				display: flex;
 				flex-direction: column;
-				height: calc(100vh - 200px);
+				height: calc(100vh - 260px);
 				min-height: 400px;
 				border: 1px solid var(--border-color);
 				border-radius: 8px;
@@ -134,6 +158,99 @@
 				display: block;
 			}
 
+			.image-container {
+				border: 1px solid var(--border-color);
+				border-radius: 8px;
+				padding: 1rem;
+				background-color: var(--light-bg);
+				min-height: 400px;
+			}
+
+			.image-panel {
+				display: flex;
+				flex-direction: column;
+				gap: 0.75rem;
+			}
+
+			#image-prompt {
+				padding: 0.75rem;
+				border: 1px solid var(--border-color);
+				border-radius: 4px;
+				font-family: inherit;
+				font-size: 0.95rem;
+				resize: vertical;
+				min-height: 80px;
+			}
+
+			.image-options {
+				display: flex;
+				gap: 1rem;
+				flex-wrap: wrap;
+			}
+
+			.image-options label {
+				flex: 1;
+				min-width: 200px;
+				display: flex;
+				flex-direction: column;
+				gap: 0.25rem;
+				font-size: 0.85rem;
+				color: var(--text-light);
+			}
+
+			#image-model,
+			#image-size {
+				padding: 0.5rem;
+				border: 1px solid var(--border-color);
+				border-radius: 4px;
+				background: white;
+				font-family: inherit;
+				color: var(--text-color);
+			}
+
+			#generate-button {
+				padding: 0.75rem 1rem;
+				background-color: var(--primary-color);
+				color: white;
+				border: none;
+				border-radius: 4px;
+				cursor: pointer;
+				font-family: inherit;
+				font-size: 0.95rem;
+				transition: background-color 0.2s;
+			}
+
+			#generate-button:hover {
+				background-color: var(--primary-hover);
+			}
+
+			#generate-button:disabled {
+				background-color: var(--text-light);
+				cursor: not-allowed;
+			}
+
+			.image-status {
+				font-style: italic;
+				color: var(--text-light);
+			}
+
+			.image-result {
+				display: flex;
+				flex-direction: column;
+				gap: 0.5rem;
+				align-items: flex-start;
+			}
+
+			.image-result img {
+				max-width: 100%;
+				border-radius: 8px;
+				border: 1px solid var(--border-color);
+			}
+
+			.image-result a {
+				color: var(--primary-color);
+			}
+
 			footer {
 				margin-top: 1rem;
 				text-align: center;
@@ -144,11 +261,16 @@
 	</head>
 	<body>
 		<header>
-			<h1>Cloudflare AI Chat</h1>
+			<h1>Cloudflare AI Chat + Image</h1>
 			<p>Powered by Cloudflare Workers AI</p>
 		</header>
 
-		<div class="chat-container">
+		<div class="tabs">
+			<button id="tab-chat" class="tab active" type="button">聊天</button>
+			<button id="tab-image" class="tab" type="button">生图</button>
+		</div>
+
+		<div id="chat-container" class="chat-container">
 			<div id="chat-messages" class="chat-messages">
 				<div class="message assistant-message">
 					<p>
@@ -169,15 +291,59 @@
 					rows="1"
 					autofocus
 				></textarea>
-				<button id="send-button">Send</button>
+				<button id="send-button">发送</button>
+			</div>
+		</div>
+
+		<div id="image-container" class="image-container" hidden>
+			<div class="image-panel">
+				<textarea
+					id="image-prompt"
+					placeholder="描述你想生成的图片，例如：一只在雪山上的橘猫，日落，电影感"
+					rows="3"
+				></textarea>
+
+				<div class="image-options">
+					<label>
+						模型
+						<select id="image-model">
+							<option value="@cf/black-forest-labs/flux-2-klein-4b">
+								FLUX.2 klein 4B（推荐，快且便宜）
+							</option>
+							<option value="@cf/black-forest-labs/flux-2-klein-9b">
+								FLUX.2 klein 9B（质量更好）
+							</option>
+							<option value="@cf/black-forest-labs/flux-1-schnell">
+								FLUX.1 schnell（最便宜）
+							</option>
+							<option value="@cf/black-forest-labs/flux-2-dev">
+								FLUX.2 dev（质量最高，慢）
+							</option>
+						</select>
+					</label>
+					<label>
+						尺寸
+						<select id="image-size">
+							<option value="512">512 × 512（省额度）</option>
+							<option value="1024" selected>1024 × 1024（推荐）</option>
+						</select>
+					</label>
+				</div>
+
+				<button id="generate-button" type="button">生成图片</button>
+				<div id="image-status" class="image-status"></div>
+				<div id="image-result" class="image-result" hidden>
+					<img id="generated-image" alt="生成的图片" />
+					<a id="download-image" href="#">下载图片</a>
+				</div>
 			</div>
 		</div>
 
 		<footer>
-			<p>Cloudflare Workers AI Chat Template &copy; 2025</p>
+			<p>Cloudflare Workers AI Chat + Image Template &copy; 2026</p>
 		</footer>
 
-		<!-- Chat app script -->
+		<!-- App script -->
 		<script src="chat.js"></script>
 	</body>
 </html>
