@@ -9,6 +9,12 @@ export interface Env {
 	AI: Ai;
 
 	/**
+	 * Optional bearer token that protects /api/* routes.
+	 * If not set, the API stays open.
+	 */
+	API_TOKEN?: string;
+
+	/**
 	 * Binding for static assets.
 	 */
 	ASSETS: { fetch: (request: Request) => Promise<Response> };

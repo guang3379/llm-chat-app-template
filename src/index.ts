@@ -29,6 +29,24 @@ const IMAGE_MODELS = [
 	"@cf/black-forest-labs/flux-2-dev",
 ] as const;
 
+// CORS headers so other web pages and platforms can call the API
+const CORS_HEADERS: Record<string, string> = {
+	"Access-Control-Allow-Origin": "*",
+	"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+	"Access-Control-Allow-Headers": "Content-Type, Authorization",
+	"Access-Control-Max-Age": "86400",
+};
+
+/**
+ * Checks the bearer token. If API_TOKEN is not configured in the environment,
+ * the API stays open (backwards compatible with the original template).
+ */
+function isAuthorized(request: Request, env: Env): boolean {
+	const token = env.API_TOKEN;
+	if (!token) return true;
+	return request.headers.get("Authorization") === `Bearer ${token}`;
+}
+
 export default {
 	/**
 	 * Main request handler for the Worker
@@ -40,9 +58,25 @@ export default {
 	): Promise<Response> {
 		const url = new URL(request.url);
 
+		// CORS preflight for API routes
+		if (url.pathname.startsWith("/api/") && request.method === "OPTIONS") {
+			return new Response(null, {
+				status: 204,
+				headers: CORS_HEADERS,
+			});
+		}
+
 		// Handle static assets (frontend)
 		if (url.pathname === "/" || !url.pathname.startsWith("/api/")) {
 			return env.ASSETS.fetch(request);
+		}
+
+		// Protect API routes with a bearer token when configured
+		if (!isAuthorized(request, env)) {
+			return Response.json(
+				{ error: "Unauthorized" },
+				{ status: 401, headers: CORS_HEADERS },
+			);
 		}
 
 		// API Routes
@@ -53,7 +87,10 @@ export default {
 			}
 
 			// Method not allowed for other request types
-			return new Response("Method not allowed", { status: 405 });
+			return new Response("Method not allowed", {
+				status: 405,
+				headers: CORS_HEADERS,
+			});
 		}
 
 		if (url.pathname === "/api/image") {
@@ -63,11 +100,17 @@ export default {
 			}
 
 			// Method not allowed for other request types
-			return new Response("Method not allowed", { status: 405 });
+			return new Response("Method not allowed", {
+				status: 405,
+				headers: CORS_HEADERS,
+			});
 		}
 
 		// Handle 404 for unmatched routes
-		return new Response("Not found", { status: 404 });
+		return new Response("Not found", {
+			status: 404,
+			headers: CORS_HEADERS,
+		});
 	},
 } satisfies ExportedHandler<Env>;
 
@@ -111,6 +154,7 @@ async function handleChatRequest(
 				"content-type": "text/event-stream; charset=utf-8",
 				"cache-control": "no-cache",
 				connection: "keep-alive",
+				...CORS_HEADERS,
 			},
 		});
 	} catch (error) {
@@ -119,7 +163,10 @@ async function handleChatRequest(
 			JSON.stringify({ error: "Failed to process request" }),
 			{
 				status: 500,
-				headers: { "content-type": "application/json" },
+				headers: {
+					"content-type": "application/json",
+					...CORS_HEADERS,
+				},
 			},
 		);
 	}
@@ -144,7 +191,7 @@ async function handleImageRequest(
 		if (!prompt) {
 			return Response.json(
 				{ error: "Prompt is required" },
-				{ status: 400 },
+				{ status: 400, headers: CORS_HEADERS },
 			);
 		}
 
@@ -152,7 +199,7 @@ async function handleImageRequest(
 		if (!IMAGE_MODELS.includes(model as (typeof IMAGE_MODELS)[number])) {
 			return Response.json(
 				{ error: "Unsupported image model" },
-				{ status: 400 },
+				{ status: 400, headers: CORS_HEADERS },
 			);
 		}
 
@@ -195,12 +242,12 @@ async function handleImageRequest(
 			throw new Error("Image model returned an empty response");
 		}
 
-		return Response.json({ image, contentType });
+		return Response.json({ image, contentType }, { headers: CORS_HEADERS });
 	} catch (error) {
 		console.error("Error processing image request:", error);
 		return Response.json(
 			{ error: "Failed to generate image" },
-			{ status: 500 },
+			{ status: 500, headers: CORS_HEADERS },
 		);
 	}
 }
