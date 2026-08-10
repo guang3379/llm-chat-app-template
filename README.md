@@ -14,6 +14,7 @@ This template demonstrates how to build an AI-powered chat interface using Cloud
 - Easy customization of models and system prompts
 - Support for AI Gateway integration
 - Clean, responsive UI that works on mobile and desktop
+- Text-to-image generation with a model picker (FLUX.2 klein 4B / klein 9B / FLUX.1 schnell / FLUX.2 dev)
 
 ## Features
 
@@ -122,6 +123,12 @@ The frontend is a simple HTML/CSS/JavaScript application that:
 ### Changing the Model
 
 To use a different AI model, update the `MODEL_ID` constant in `src/index.ts`. You can find available models in the [Cloudflare Workers AI documentation](https://developers.cloudflare.com/workers-ai/models/).
+
+### Image Generation
+
+The app includes a text-to-image tab backed by the `/api/image` endpoint. By default it uses `@cf/black-forest-labs/flux-2-klein-4b`, which offers the best balance of quality, speed, and free-tier Neurons usage. In the UI you can also pick `flux-2-klein-9b` (better quality), `flux-1-schnell` (cheapest), or `flux-2-dev` (highest quality, slowest).
+
+To change the default image model, update the `IMAGE_MODEL_ID` constant in `src/index.ts`. The models users can pick from are listed in the `IMAGE_MODELS` array. Note that every image generation request consumes Neurons from your Workers AI quota.
 
 ### Using AI Gateway
 
