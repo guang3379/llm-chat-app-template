@@ -1,16 +1,48 @@
 /**
- * LLM Chat App Frontend
+ * Cloudflare AI Chat + Image Frontend
  *
- * Handles the chat UI interactions and communication with the backend API.
+ * Handles the chat UI, tab switching, and text-to-image generation.
  */
 
-// DOM elements
+// ---------- DOM elements ----------
+const chatContainer = document.getElementById("chat-container");
+const imageContainer = document.getElementById("image-container");
+const tabChat = document.getElementById("tab-chat");
+const tabImage = document.getElementById("tab-image");
+
 const chatMessages = document.getElementById("chat-messages");
 const userInput = document.getElementById("user-input");
 const sendButton = document.getElementById("send-button");
 const typingIndicator = document.getElementById("typing-indicator");
 
-// Chat state
+const imagePrompt = document.getElementById("image-prompt");
+const imageModel = document.getElementById("image-model");
+const imageSize = document.getElementById("image-size");
+const generateButton = document.getElementById("generate-button");
+const imageStatus = document.getElementById("image-status");
+const imageResult = document.getElementById("image-result");
+const generatedImage = document.getElementById("generated-image");
+const downloadImage = document.getElementById("download-image");
+
+// ---------- Tab switching ----------
+tabChat.addEventListener("click", () => switchTab("chat"));
+tabImage.addEventListener("click", () => switchTab("image"));
+
+function switchTab(tab) {
+	const isChat = tab === "chat";
+	tabChat.classList.toggle("active", isChat);
+	tabImage.classList.toggle("active", !isChat);
+	chatContainer.hidden = !isChat;
+	imageContainer.hidden = isChat;
+
+	if (isChat) {
+		userInput.focus();
+	} else {
+		imagePrompt.focus();
+	}
+}
+
+// ---------- Chat state ----------
 let chatHistory = [
 	{
 		role: "assistant",
@@ -227,4 +259,71 @@ function consumeSseEvents(buffer) {
 		events.push(dataLines.join("\n"));
 	}
 	return { events, buffer: normalized };
+}
+
+// ---------- Image generation ----------
+let isGenerating = false;
+
+// Generate on button click or Enter (without Shift)
+generateButton.addEventListener("click", generateImage);
+imagePrompt.addEventListener("keydown", function (e) {
+	if (e.key === "Enter" && !e.shiftKey) {
+		e.preventDefault();
+		generateImage();
+	}
+});
+
+/**
+ * Sends a text-to-image request to the API and displays the result
+ */
+async function generateImage() {
+	const prompt = imagePrompt.value.trim();
+
+	// Don't generate empty prompts
+	if (prompt === "" || isGenerating) return;
+
+	isGenerating = true;
+	generateButton.disabled = true;
+	imageResult.hidden = true;
+	imageStatus.textContent = "正在生成图片，通常需要几秒到几十秒...";
+
+	try {
+		const size = Number(imageSize.value);
+		const response = await fetch("/api/image", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				prompt,
+				model: imageModel.value,
+				width: size,
+				height: size,
+			}),
+		});
+
+		const data = await response.json();
+		if (!response.ok) {
+			throw new Error(data.error || "Failed to generate image");
+		}
+		if (!data.image) {
+			throw new Error("Model returned an empty image");
+		}
+
+		const contentType = data.contentType || "image/jpeg";
+		const isPng = contentType.includes("png");
+		generatedImage.src = `data:${contentType};base64,${data.image}`;
+		downloadImage.href = generatedImage.src;
+		downloadImage.download = `cloudflare-ai-${Date.now()}.${
+			isPng ? "png" : "jpg"
+		}`;
+		imageResult.hidden = false;
+		imageStatus.textContent = "";
+	} catch (error) {
+		console.error("Error:", error);
+		imageStatus.textContent = "生成失败：" + error.message;
+	} finally {
+		isGenerating = false;
+		generateButton.disabled = false;
+	}
 }
