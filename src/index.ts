@@ -17,6 +17,18 @@ const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8";
 const SYSTEM_PROMPT =
 	"You are a helpful, friendly assistant. Provide concise and accurate responses.";
 
+// Default model for text-to-image generation
+// https://developers.cloudflare.com/workers-ai/models/
+const IMAGE_MODEL_ID = "@cf/black-forest-labs/flux-2-klein-4b";
+
+// Models users can pick from in the image tab
+const IMAGE_MODELS = [
+	"@cf/black-forest-labs/flux-2-klein-4b",
+	"@cf/black-forest-labs/flux-2-klein-9b",
+	"@cf/black-forest-labs/flux-1-schnell",
+	"@cf/black-forest-labs/flux-2-dev",
+] as const;
+
 export default {
 	/**
 	 * Main request handler for the Worker
@@ -38,6 +50,16 @@ export default {
 			// Handle POST requests for chat
 			if (request.method === "POST") {
 				return handleChatRequest(request, env);
+			}
+
+			// Method not allowed for other request types
+			return new Response("Method not allowed", { status: 405 });
+		}
+
+		if (url.pathname === "/api/image") {
+			// Handle POST requests for image generation
+			if (request.method === "POST") {
+				return handleImageRequest(request, env);
 			}
 
 			// Method not allowed for other request types
@@ -67,20 +89,22 @@ async function handleChatRequest(
 			messages.unshift({ role: "system", content: SYSTEM_PROMPT });
 		}
 
-		const inputs = {
-			messages,
-			max_tokens: 1024,
-			stream: true,
-		} satisfies AiTextGenerationInput & { stream: true };
-
-		const stream = await env.AI.run<typeof MODEL_ID>(MODEL_ID, inputs, {
-			// Uncomment to use AI Gateway
-			// gateway: {
-			//   id: "YOUR_GATEWAY_ID", // Replace with your AI Gateway ID
-			//   skipCache: false,      // Set to true to bypass cache
-			//   cacheTtl: 3600,        // Cache time-to-live in seconds
-			// },
-		});
+		const stream = await env.AI.run(
+			MODEL_ID,
+			{
+				messages,
+				max_tokens: 1024,
+				stream: true,
+			},
+			{
+				// Uncomment to use AI Gateway
+				// gateway: {
+				//   id: "YOUR_GATEWAY_ID", // Replace with your AI Gateway ID
+				//   skipCache: false,      // Set to true to bypass cache
+				//   cacheTtl: 3600,        // Cache time-to-live in seconds
+				// },
+			},
+		);
 
 		return new Response(stream, {
 			headers: {
@@ -99,4 +123,91 @@ async function handleChatRequest(
 			},
 		);
 	}
+}
+
+/**
+ * Handles text-to-image API requests
+ */
+async function handleImageRequest(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	try {
+		const body = (await request.json()) as {
+			prompt?: string;
+			model?: string;
+			width?: number;
+			height?: number;
+		};
+
+		const prompt = body.prompt?.trim();
+		if (!prompt) {
+			return Response.json(
+				{ error: "Prompt is required" },
+				{ status: 400 },
+			);
+		}
+
+		const model = body.model ?? IMAGE_MODEL_ID;
+		if (!IMAGE_MODELS.includes(model as (typeof IMAGE_MODELS)[number])) {
+			return Response.json(
+				{ error: "Unsupported image model" },
+				{ status: 400 },
+			);
+		}
+
+		const width = clampDimension(body.width ?? 1024);
+		const height = clampDimension(body.height ?? 1024);
+
+		// The published Worker types may not include the multipart input for newer
+		// FLUX.2 image models yet, so call through a permissive signature.
+		const run = env.AI.run as (model: string, input: unknown) => Promise<unknown>;
+
+		let resp: unknown;
+		if (model === "@cf/black-forest-labs/flux-1-schnell") {
+			// FLUX.1 schnell takes a plain JSON input
+			resp = await run(model, { prompt });
+		} else {
+			// FLUX.2 models require multipart form data, even for text-only prompts
+			const form = new FormData();
+			form.append("prompt", prompt);
+			form.append("width", String(width));
+			form.append("height", String(height));
+
+			// FormData doesn't expose its serialized body or boundary. Passing it to a
+			// Response constructor serializes it and generates the Content-Type header
+			// with the boundary, which is required for the server to parse the multipart fields.
+			const formResponse = new Response(form);
+			resp = await run(model, {
+				multipart: {
+					body: formResponse.body,
+					contentType: formResponse.headers.get("content-type"),
+				},
+			});
+		}
+
+		const { image, contentType } = resp as unknown as {
+			image?: string;
+			contentType?: string;
+		};
+
+		if (!image) {
+			throw new Error("Image model returned an empty response");
+		}
+
+		return Response.json({ image, contentType });
+	} catch (error) {
+		console.error("Error processing image request:", error);
+		return Response.json(
+			{ error: "Failed to generate image" },
+			{ status: 500 },
+		);
+	}
+}
+
+/**
+ * Keeps image dimensions within the range supported by FLUX models.
+ */
+function clampDimension(value: number): number {
+	return Math.min(1920, Math.max(256, Math.round(value)));
 }
