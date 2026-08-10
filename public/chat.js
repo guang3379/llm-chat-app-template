@@ -24,6 +24,34 @@ const imageResult = document.getElementById("image-result");
 const generatedImage = document.getElementById("generated-image");
 const downloadImage = document.getElementById("download-image");
 
+const keyBar = document.getElementById("key-bar");
+const apiKeyInput = document.getElementById("api-key-input");
+const saveKeyButton = document.getElementById("save-key-button");
+
+// ---------- API key (stored locally in the browser) ----------
+let apiToken = localStorage.getItem("api_token") || "";
+
+if (!apiToken) {
+	keyBar.hidden = false;
+}
+
+saveKeyButton.addEventListener("click", () => {
+	const value = apiKeyInput.value.trim();
+	if (!value) return;
+	apiToken = value;
+	localStorage.setItem("api_token", value);
+	keyBar.hidden = true;
+	apiKeyInput.value = "";
+});
+
+function authHeaders(extra = {}) {
+	const headers = { ...extra };
+	if (apiToken) {
+		headers["Authorization"] = `Bearer ${apiToken}`;
+	}
+	return headers;
+}
+
 // ---------- Tab switching ----------
 tabChat.addEventListener("click", () => switchTab("chat"));
 tabImage.addEventListener("click", () => switchTab("image"));
@@ -110,9 +138,7 @@ async function sendMessage() {
 		// Send request to API
 		const response = await fetch("/api/chat", {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-			},
+			headers: authHeaders({ "Content-Type": "application/json" }),
 			body: JSON.stringify({
 				messages: chatHistory,
 			}),
@@ -120,6 +146,10 @@ async function sendMessage() {
 
 		// Handle errors
 		if (!response.ok) {
+			if (response.status === 401) {
+				keyBar.hidden = false;
+				throw new Error("未授权，请检查 API 密钥");
+			}
 			throw new Error("Failed to get response");
 		}
 		if (!response.body) {
@@ -291,9 +321,7 @@ async function generateImage() {
 		const size = Number(imageSize.value);
 		const response = await fetch("/api/image", {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-			},
+			headers: authHeaders({ "Content-Type": "application/json" }),
 			body: JSON.stringify({
 				prompt,
 				model: imageModel.value,
@@ -304,6 +332,9 @@ async function generateImage() {
 
 		const data = await response.json();
 		if (!response.ok) {
+			if (response.status === 401) {
+				keyBar.hidden = false;
+			}
 			throw new Error(data.error || "Failed to generate image");
 		}
 		if (!data.image) {
